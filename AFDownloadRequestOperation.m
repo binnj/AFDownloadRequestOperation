@@ -210,7 +210,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
             if (self.isDeletingTempFileOnCancel) {
                 [self deleteTempFileWithError:&localError];
                 if (localError) {
-                    _fileError = localError;
+                    self->_fileError = localError;
                 }
             }
 
@@ -220,11 +220,11 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
             @synchronized(self) {
                 NSFileManager *fileManager = [NSFileManager new];
                 if (self.shouldOverwrite) {
-                    [fileManager removeItemAtPath:_targetPath error:NULL]; // avoid "File exists" error
+                    [fileManager removeItemAtPath:self->_targetPath error:NULL]; // avoid "File exists" error
                 }
-                [fileManager moveItemAtPath:[self tempPath] toPath:_targetPath error:&localError];
+                [fileManager moveItemAtPath:[self tempPath] toPath:self->_targetPath error:&localError];
                 if (localError) {
-                    _fileError = localError;
+                    self->_fileError = localError;
                 }
             }
         }
@@ -238,7 +238,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
         } else {
             if (success) {
                 dispatch_async(self.successCallbackQueue ?: dispatch_get_main_queue(), ^{
-                    success(self, _targetPath);
+                    success(self, self->_targetPath);
                 });
             }
         }
