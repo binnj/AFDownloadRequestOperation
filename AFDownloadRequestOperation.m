@@ -40,7 +40,6 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 @interface AFDownloadRequestOperation() {
     NSError *_fileError;
 }
-@property (nonatomic, strong) NSString *tempPath;
 @property (assign) long long totalContentLength;
 @property (nonatomic, assign) long long totalBytesReadPerDownload;
 @property (assign) long long offsetContentLength;
@@ -64,33 +63,18 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
     if ((self = [super initWithRequest:urlRequest])) {
         NSParameterAssert(targetPath != nil && urlRequest != nil);
         _shouldResume = shouldResume;
-
-        // Ee assume that at least the directory has to exist on the targetPath
-        BOOL isDirectory;
-        if(![[NSFileManager defaultManager] fileExistsAtPath:targetPath isDirectory:&isDirectory]) {
-            isDirectory = NO;
-        }
-        // \If targetPath is a directory, use the file name we got from the urlRequest.
-        if (isDirectory) {
-            NSString *fileName = [urlRequest.URL lastPathComponent];
-            _targetPath = [NSString pathWithComponents:@[targetPath, fileName]];
-        }else {
-            _targetPath = targetPath;
-        }
-
-        // Download is saved into a temorary file and renamed upon completion.
-        NSString *tempPath = [self tempPath];
+        _targetPath = targetPath;
 
         // Do we need to resume the file?
         BOOL isResuming = [self updateByteStartRangeForRequest];
         
         // Try to create/open a file at the target location
         if (!isResuming) {
-            int fileDescriptor = open([tempPath UTF8String], O_CREAT | O_EXCL | O_RDWR, 0666);
+            int fileDescriptor = open([_targetPath UTF8String], O_CREAT | O_EXCL | O_RDWR, 0666);
             if (fileDescriptor > 0) close(fileDescriptor);
         }
 
-        self.outputStream = [NSOutputStream outputStreamToFileAtPath:tempPath append:isResuming];
+        self.outputStream = [NSOutputStream outputStreamToFileAtPath:_targetPath append:isResuming];
         // If the output stream can't be created, instantly destroy the object.
         if (!self.outputStream) return nil;
         
@@ -104,7 +88,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 - (BOOL)updateByteStartRangeForRequest {
     BOOL isResuming = NO;
     if (self.shouldResume) {
-        unsigned long long downloadedBytes = [self fileSizeForPath:[self tempPath]];
+        unsigned long long downloadedBytes = [self fileSizeForPath:_targetPath];
         if (downloadedBytes > 1) {
 
             // If the the current download-request's data has been fully downloaded, but other causes of the operation failed (such as the inability of the incomplete temporary file copied to the target location), next, retry this download-request, the starting-value (equal to the incomplete temporary file size) will lead to an HTTP 416 out of range error, unless we subtract one byte here. (We don't know the final size before sending the request)
@@ -121,28 +105,6 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 }
 
 #pragma mark - Public
-
-- (BOOL)deleteTempFileWithError:(NSError *__autoreleasing*)error {
-    NSFileManager *fileManager = [NSFileManager new];
-    BOOL success = YES;
-    @synchronized(self) {
-        NSString *tempPath = [self tempPath];
-        if ([fileManager fileExistsAtPath:tempPath]) {
-            success = [fileManager removeItemAtPath:[self tempPath] error:error];
-        }
-    }
-    return success;
-}
-
-- (NSString *)tempPath {
-    NSString *tempPath = nil;
-    if (self.targetPath) {
-        NSString *md5URLString = [[self class] md5StringForString:self.targetPath];
-        tempPath = [[[self class] cacheFolder] stringByAppendingPathComponent:md5URLString];
-    }
-    return tempPath;
-}
-
 
 - (void)setProgressiveDownloadProgressBlock:(void (^)(AFDownloadRequestOperation *operation, NSInteger bytesRead, long long totalBytesRead, long long totalBytesExpected, long long totalBytesReadForFile, long long totalBytesExpectedToReadForFile))block {
     self.progressiveDownloadProgress = block;
@@ -187,7 +149,7 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 + (NSIndexSet *)acceptableStatusCodes {
 	NSMutableIndexSet *acceptableStatusCodes = [NSMutableIndexSet indexSetWithIndexesInRange:NSMakeRange(200, 100)];
 	[acceptableStatusCodes addIndex:416];
-	
+	[acceptableStatusCodes addIndex:304];
 	return acceptableStatusCodes;
 }
 
@@ -204,31 +166,6 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-retain-cycles"
     self.completionBlock = ^ {
-        NSError *localError = nil;
-        if([self isCancelled]) {
-            // should we clean up? most likely we don't.
-            if (self.isDeletingTempFileOnCancel) {
-                [self deleteTempFileWithError:&localError];
-                if (localError) {
-                    self->_fileError = localError;
-                }
-            }
-
-        // loss of network connections = error set, but not cancel
-        }else if(!self.error) {
-            // move file to final position and capture error
-            @synchronized(self) {
-                NSFileManager *fileManager = [NSFileManager new];
-                if (self.shouldOverwrite) {
-                    [fileManager removeItemAtPath:self->_targetPath error:NULL]; // avoid "File exists" error
-                }
-                [fileManager moveItemAtPath:[self tempPath] toPath:self->_targetPath error:&localError];
-                if (localError) {
-                    self->_fileError = localError;
-                }
-            }
-        }
-
         if (self.error) {
             if (failure) {
                 dispatch_async(self.failureCallbackQueue ?: dispatch_get_main_queue(), ^{
@@ -277,18 +214,17 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
     self.offsetContentLength = MAX(fileOffset, 0);
     self.totalContentLength = totalContentLength;
     
-    // Truncate cache file to offset provided by server.
+    // Truncate cache file to offset provided by server.    
     // Using self.outputStream setProperty:@(_offsetContentLength) forKey:NSStreamFileCurrentOffsetKey]; will not work (in contrary to the documentation)
-    NSString *tempPath = [self tempPath];
-    if ([self fileSizeForPath:tempPath] != _offsetContentLength) {
+    if ([self fileSizeForPath:_targetPath] != _offsetContentLength) {
         [self.outputStream close];
         BOOL isResuming = _offsetContentLength > 0;
         if (isResuming) {
-            NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:tempPath];
+            NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:_targetPath];
             [file truncateFileAtOffset:_offsetContentLength];
             [file closeFile];
         }
-        self.outputStream = [NSOutputStream outputStreamToFileAtPath:tempPath append:isResuming];
+        self.outputStream = [NSOutputStream outputStreamToFileAtPath:_targetPath append:isResuming];
         [self.outputStream open];
     }
 }

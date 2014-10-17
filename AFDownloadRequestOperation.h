@@ -30,12 +30,7 @@
 @interface AFDownloadRequestOperation : AFHTTPRequestOperation
 
 /** 
- A String value that defines the target path or directory.
- 
- We try to be clever here and understand both a directory or a filename.
- The target directory should already be create, or the download fill fail.
- 
- If the target is a directory, we use the last part of the URL as a default file name.
+ A String value that defines the target path.
  */
 @property (strong) NSString *targetPath;
 
@@ -51,11 +46,6 @@
  Can only be set while creating the request.
  */
 @property (assign, readonly) BOOL shouldResume;
-
-/** 
- Deletes the temporary file if operations is cancelled. Defaults to `NO`.
- */
-@property (assign, getter=isDeletingTempFileOnCancel) BOOL deleteTempFileOnCancel;
 
 /** 
  Expected total length. This is different than expectedContentLength if the file is resumed.
@@ -86,18 +76,6 @@
  @return A new download request operation
  */
 - (id)initWithRequest:(NSURLRequest *)urlRequest targetPath:(NSString *)targetPath shouldResume:(BOOL)shouldResume;
-
-/** 
- Deletes the temporary file.
- 
- Returns `NO` if an error happened, `YES` if the file is removed or did not exist in the first place.
- */
-- (BOOL)deleteTempFileWithError:(NSError **)error;
-
-/** 
- Returns the path used for the temporary file. Returns `nil` if the targetPath has not been set.
- */
-- (NSString *)tempPath;
 
 /**
  Sets a callback to be called when an undetermined number of bytes have been downloaded from the server. This is a variant of setDownloadProgressBlock that adds support for progressive downloads and adds the 
