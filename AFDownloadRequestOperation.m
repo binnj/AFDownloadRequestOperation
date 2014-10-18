@@ -216,7 +216,9 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
     
     // Truncate cache file to offset provided by server.    
     // Using self.outputStream setProperty:@(_offsetContentLength) forKey:NSStreamFileCurrentOffsetKey]; will not work (in contrary to the documentation)
-    if ([self fileSizeForPath:_targetPath] != _offsetContentLength) {
+    unsigned long long currentFileSize = [self fileSizeForPath:_targetPath];
+    if (currentFileSize != _offsetContentLength) {
+        NSLog(@"Rewinding %llu bytes %llu->%llu", (currentFileSize - _offsetContentLength), currentFileSize, _offsetContentLength);
         [self.outputStream close];
         BOOL isResuming = _offsetContentLength > 0;
         if (isResuming) {
