@@ -209,6 +209,10 @@ typedef void (^AFURLConnectionProgressiveOperationProgressBlock)(AFDownloadReque
             }
         }
     }
+    // SCC: Added line with MK here to NOT TRUNCATE UNLESS 200! Ie, if 304, don't erase what you have.
+    else if (httpResponse.statusCode != 200) {
+        return;
+    }
 
     self.totalBytesReadPerDownload = 0;
     self.offsetContentLength = MAX(fileOffset, 0);
